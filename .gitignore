@@ -4,6 +4,9 @@
 
 # Harness = local-only workspace learning system; kept on disk, never pushed.
 harness/
+
+# Claude Code config (skills, rules, hooks, agents) — kept local/private, never pushed.
+.claude/
 *.pem
 *.key
 secrets/
