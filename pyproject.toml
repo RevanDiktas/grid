@@ -12,6 +12,10 @@ dependencies = [
     "httpx>=0.27",
     "pydantic>=2.7",
     "python-dotenv>=1.0",
+    # PDF text extraction for the Investeringsplannen (facts-only; the PDF is never persisted).
+    # pypdf is pure-Python with no cryptography/Rust build dep — installs reliably here
+    # (pdfplumber's pdfminer.six→cryptography needs a Rust build that fails on this box).
+    "pypdf>=4.0",
 ]
 
 [project.optional-dependencies]
