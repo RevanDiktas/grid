@@ -5,11 +5,12 @@ from __future__ import annotations
 import sys
 from collections.abc import Callable
 
-from ingestion import capaciteitskaart
+from ingestion import capaciteitskaart, cbs_postcode6
 
 # Registered ingestion jobs. Each new source adds one entry (build-ingestion-job skill).
 JOBS: dict[str, Callable[[], None]] = {
     capaciteitskaart.SOURCE: capaciteitskaart.main,
+    cbs_postcode6.SOURCE: cbs_postcode6.main,
 }
 
 
