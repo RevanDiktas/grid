@@ -19,6 +19,21 @@
 | `liander_waitlist` 🟡 | **PLANNED** — per-station queue depth + expansion schedule | Liander open data / PDOK/ArcGIS (unverified) | TBD | station/region | TBD | CC BY 4.0 (verify) | **PLANNED / unverified.** Timeline-feature input |
 | `investeringsplannen_2026` 🟡 | **PLANNED** — project-level reinforcement schedules (regional 10-yr / TenneT 15-yr) | DSO/TenneT Investeringsplannen 2026 (unverified) | TBD | project/region | 2-yearly | verify | **PLANNED / unverified.** Quantitative horizon (regional first 3 yrs / TenneT first 5 yrs); feeds timeline + delay-risk |
 
+## Licence & report-safety (enforced in code)
+
+**Authoritative copy lives in `provenance/sources.py`** (imported by ingestion + the report path);
+this table mirrors it for humans. Operating rule: **use FACTS + our own words + a citation; never
+reproduce a source's expression (tables/figures/maps/text/the document); attribution ≠ permission.**
+`customer_report_safe=FALSE` data is blocked from the report path in code (`provenance.assert_report_safe`).
+
+| Source | Licence | `customer_report_safe` | `reproduction_allowed` | Attribution (must render) | Usage note |
+|---|---|---|---|---|---|
+| `cbs_postcode6` | CC-BY-4.0 | ✅ yes | ✅ yes | `© CBS, © Esri Nederland` | Attribution mandatory on any map/report showing the polygons (licence condition). |
+| `capaciteitskaart` | ambiguous-netbeheerder | ✅ yes | ❌ no | `Bron: Netbeheer Nederland, Capaciteitskaart elektriciteitsnet` | Indicative; always show confidence + as_of. Facts only, not the raw file. |
+| `investeringsplannen_2026` | proprietary-netbeheerder (no open licence) | ✅ **facts only** | ❌ no | `Bron: <operator> Investeringsplan 2026` | Extract facts only. NEVER store/serve/mirror/reproduce the PDF or its tables/figures/maps/text. |
+| `enexis_waitlist` | esri-platform-tou | ⛔ **no** | ❌ no | `Bron: Netbeheer Nederland / Esri Nederland` | LICENCE-BLOCKED for redistribution until cleared owner-direct via Partners in Energie. Prototype/read only. |
+| _all other registered sources_ | unverified | ⛔ no (default) | ❌ no | — | Report-unsafe by default until each licence is individually assessed. |
+
 ## `cbs_postcode6` — verified details (2026-07-07)
 
 Verified live against the service this session (GetFeature sampled). The PC6 **geometry backbone**

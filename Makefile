@@ -61,7 +61,7 @@ lint:
 	$(UV) run ruff check .
 
 typecheck:
-	$(UV) run mypy -p ingestion -p db
+	$(UV) run mypy -p ingestion -p db -p provenance
 
 fmt:
 	$(UV) run ruff format .
