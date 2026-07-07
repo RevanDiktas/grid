@@ -1,6 +1,9 @@
 .env
 .env.*
 !.env.example
+
+# Harness = local-only workspace learning system; kept on disk, never pushed.
+harness/
 *.pem
 *.key
 secrets/

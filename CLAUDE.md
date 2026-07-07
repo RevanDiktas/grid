@@ -42,6 +42,11 @@ Full context lives in `docs/`: `docs/founding-thesis.md` (product + market + com
 
 ## Always
 
+- **Use the harness (`harness/`).** Start each session by reading `harness/STATUS.md` and skimming
+  `harness/pitfalls.md`. End each session by rewriting `harness/STATUS.md` and appending to
+  `harness/session-log.md`. The moment something breaks and you fix it, add a `harness/pitfalls.md`
+  entry; when you make a real architectural/product choice, add one to `harness/decisions.md`. See
+  `harness/README.md` for the loop. This is our learning system — keep it honest.
 - Run `make check` and relevant tests before committing; fix failures before moving on.
 - Every data row carries a `source` and an `as_of` date. **Provenance is the moat — no exceptions.**
 - Keep **raw ingested facts** separate from **derived intelligence** (`assess()` output). Never overwrite raw data.
