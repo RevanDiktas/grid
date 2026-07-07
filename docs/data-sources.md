@@ -5,7 +5,8 @@
 | Source (name) | Provides | Access | Format | Geo key | Cadence | Licence | Caveats |
 |---|---|---|---|---|---|---|---|
 | `capaciteitskaart` | Availability **category** (offtake + feed-in) per PC6 | `data.partnersinenergie.nl/capaciteitskaart/api/download/congestie_pc6.csv` (old netbeheernederland URL 301s here) | **CSV** | postcode-6 | irregular / on-demand | **Ambiguous — see below** | **Reference implementation.** Traffic-light class, *not* MW; no geometry; as_of is per-DSO; HTTP 500 observed |
-| `vivet` | Substation-level capacity, **3/5/10-yr forward** | Kadaster via **PDOK** (pdok.nl) | Geo (WFS/WMS) | substation | quarterly | Open gov | Powers timeline estimates |
+| `cbs_postcode6` | PC6 **polygon geometry** (the `areas` layer) — geometry only, no capacity | PDOK WFS 2.0 `service.pdok.nl/cbs/postcode6/2024/wfs/v1_0` (keyless) | **WFS → GeoJSON** | postcode-6 | yearly vintage | **CC BY 4.0** (`© CBS / PDOK`) | Geometry backbone for the map; native CRS is **RD/28992** (reproject to 4326); 464,964 features; see below |
+| `vivet` | ~~Substation-level capacity, 3/5/10-yr forward~~ | ~~Kadaster via PDOK~~ | — | — | — | — | ⛔ **RETIRED — see below.** Do **not** build. Timeline is re-sourced from DSO waitlists + Investeringsplannen |
 | `liander` | Topology, stations, forecasts, capacity-per-region | liander.nl/over-ons/open-data; data.overheid.nl; PDOK/ArcGIS | Geo/CSV | station/region | varies | CC BY 4.0 (many sets) | Attribution required |
 | `enexis` | Transportschaarste, waiting lists per station | enexis.nl open data; data.overheid.nl/.../enexis | CSV/map | station/region | monthly-ish | Open (verify) | Province waiting-list maps |
 | `stedin` | Topology, capacity | data.overheid.nl/.../stedin | Geo/CSV | station/region | varies | Open (verify) | |
@@ -14,6 +15,43 @@
 | `gopacs` | Congestion & redispatch signals | gopacs.eu | web/data | area | frequent | verify | Feeds congestion-risk score |
 | `capacitypedia` | Pan-EU capacity index (roadmap) | ENTSO-E / DSO Entity portal | links/index | country | periodic | Open | Directory of links — for EU expansion later |
 | `partners-in-energie` | Request channel for non-open DSO data | partnersinenergie.nl | request | — | — | per request | Start requests early; doubles as DSO relationship |
+| `enexis_waitlist` 🟡 | **PLANNED** — per-station queue depth + planned-expansion date + expected added MW | Enexis open data / ArcGIS (unverified) | TBD | station/region | TBD | verify | **PLANNED / unverified.** Timeline-feature input (see below). Do not build until a research gate confirms queryable fields |
+| `liander_waitlist` 🟡 | **PLANNED** — per-station queue depth + expansion schedule | Liander open data / PDOK/ArcGIS (unverified) | TBD | station/region | TBD | CC BY 4.0 (verify) | **PLANNED / unverified.** Timeline-feature input |
+| `investeringsplannen_2026` 🟡 | **PLANNED** — project-level reinforcement schedules (regional 10-yr / TenneT 15-yr) | DSO/TenneT Investeringsplannen 2026 (unverified) | TBD | project/region | 2-yearly | verify | **PLANNED / unverified.** Quantitative horizon (regional first 3 yrs / TenneT first 5 yrs); feeds timeline + delay-risk |
+
+## `cbs_postcode6` — verified details (2026-07-07)
+
+Verified live against the service this session (GetFeature sampled). The PC6 **geometry backbone**
+for the `areas` layer — carries geometry, **not** capacity.
+
+- **Service:** PDOK WFS 2.0, base `https://service.pdok.nl/cbs/postcode6/2024/wfs/v1_0`. Keyless.
+  FeatureType `postcode6:postcode6`; PC6 id field `postcode6` (e.g. `1011AB`); geometry field `geom`
+  (MultiPolygon). ~100 extra CBS statistics columns are ignored — we keep only postcode + geometry.
+- **CRS gotcha (important):** the default GeoJSON (`outputFormat=application/json`) is returned in
+  **EPSG:28992 (RD New)** — coordinates are easting,northing **metres, not lon,lat**. We fetch native
+  RD (unambiguous axis order) and reproject to 4326 in-DB via `ST_Transform`, dodging the WFS-2.0
+  EPSG:4326 lat,lon axis-flip trap (which silently returns HTTP 200 + wrong/empty data). See pitfalls.
+- **Volume & paging:** `numberMatched=464964` nationally; server page cap = 1000 → page with
+  `startIndex` + `count=1000` (~465 requests). bbox filter uses `x1,y1,x2,y2,EPSG::28992`.
+- **as_of:** the response carries **no Last-Modified** header, so as_of cannot come from HTTP. We use
+  the dataset vintage in the URL path (2024) → `2024-01-01`, the reference date of an annual CBS
+  product — a documented convention, logged explicitly, **not** an invented figure.
+- **Licence:** **CC BY 4.0** (`<ows:Fees>none</ows:Fees>`, AccessConstraints = CC BY 4.0). Attribution
+  string: `© CBS / PDOK, CC BY 4.0`.
+
+## `vivet` — RETIRED (verified 2026-07-07)
+
+- **The PDOK VIVET service ("Beschikbare capaciteit elektriciteitsnet", Kadaster) was taken out of
+  production on 11 Jun 2025.** All its endpoints (`service.pdok.nl/kadaster/netcapaciteit/{wfs,wms,atom}`,
+  the OAF `/collections`) return **HTTP 404**, verified live; PDOK itself is healthy. Confirmed by PDOK's
+  own retirement notice (`pdok.nl/-/dataset-beschikbare-capaciteit-elektriciteitsnet-van-kadaster-uit-productie`).
+- **A live successor exists off-PDOK** — Netbeheer Nederland's Capaciteitskaart as a public ArcGIS
+  Feature Service (`services.arcgis.com/nSZVuSZjHpEZZbRo/.../Capaciteitskaart_elektriciteitsnet_v2_afname/FeatureServer/0`).
+  But it is **voedingsgebied-polygon, categorical status codes (`afname`/`opwek`), NOT MW**, **has no
+  3/5/10-yr forward horizons**, and its **licence is unconfirmed**. It is therefore **demoted to an
+  optional geometry/status convenience — NOT the timeline source** (see `harness/decisions.md` D7).
+- **The forward-looking timeline is re-sourced** from DSO waitlist maps (`enexis_waitlist`,
+  `liander_waitlist`) + `investeringsplannen_2026`, plus a delay-risk adjustment in `assess()`.
 
 ## `capaciteitskaart` — verified details (2026-07-07)
 
