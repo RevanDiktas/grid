@@ -1,0 +1,24 @@
+# GridScout local database: PostgreSQL + PostGIS.
+# Postgres data lives in the named volume `gridscout_pgdata`, which is stored INSIDE
+# the Colima VM (whose home sits on the APFS disk-image on the Expansion drive). It is
+# never bind-mounted onto exFAT, which cannot host a Postgres data directory.
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: gridscout-db
+    environment:
+      POSTGRES_USER: gridscout
+      POSTGRES_PASSWORD: gridscout
+      POSTGRES_DB: gridscout
+    ports:
+      - "5432:5432"
+    volumes:
+      - gridscout_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gridscout -d gridscout"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  gridscout_pgdata:

@@ -1,0 +1,46 @@
+[project]
+name = "gridscout"
+version = "0.0.1"
+description = "GridScout — the intelligence layer on top of NL grid-capacity data"
+requires-python = ">=3.12"
+# Core runtime: enough to ingest structured sources and load PostGIS.
+# Heavy / system-dependent libs are optional extras so `uv sync` stays fast and reliable.
+dependencies = [
+    "pandas>=2.2",
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.2",
+    "httpx>=0.27",
+    "pydantic>=2.7",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+# Geometry work (PC6 polygon joins, spatial parsing) — pulls GDAL wheels.
+geo = ["geopandas>=1.0", "shapely>=2.0"]
+# ENTSO-E transmission source.
+entsoe = ["entsoe-py>=0.6"]
+# Feasibility-report rendering (needs cairo/pango system libs).
+reports = ["weasyprint>=62"]
+
+[dependency-groups]
+dev = ["ruff>=0.6", "pytest>=8.2", "mypy>=1.11", "pandas-stubs"]
+
+# Treat this repo as an environment to manage, not a package to build/install.
+# Lets `uv run python -m ingestion.run ...` work with the repo root on sys.path,
+# without requiring a build backend.
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
