@@ -259,7 +259,13 @@ def upsert(areas: list[Area], conn: psycopg.Connection | None = None) -> int:
                     INSERT INTO areas (pc6, geom, source, as_of)
                     VALUES (
                         %s,
-                        ST_Multi(ST_Transform(ST_SetSRID(ST_GeomFromGeoJSON(%s), %s), 4326)),
+                        -- reproject RD->4326, then repair source self-intersections
+                        -- (~17 of 464964 CBS polygons); CollectionExtract(...,3) keeps
+                        -- polygons only and guarantees a MultiPolygon for the typed column.
+                        ST_Multi(ST_CollectionExtract(
+                            ST_MakeValid(
+                                ST_Transform(ST_SetSRID(ST_GeomFromGeoJSON(%s), %s), 4326)
+                            ), 3)),
                         %s, %s
                     )
                     ON CONFLICT (pc6) DO UPDATE SET
