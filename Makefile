@@ -10,6 +10,11 @@ SOURCE ?=
 export UV_PROJECT_ENVIRONMENT := /Volumes/gridscout-data/venv
 export UV_LINK_MODE := copy
 
+# Docker/Colima live on the same image; talk to Colima's socket with a clean config
+# (avoids the stale docker-credential-desktop helper on the internal disk).
+export DOCKER_HOST := unix:///Volumes/gridscout-data/colima/docker.sock
+export DOCKER_CONFIG := /Volumes/gridscout-data/docker-config
+
 .DEFAULT_GOAL := help
 .PHONY: help setup db-up db-down migrate ingest serve report test check lint typecheck fmt
 

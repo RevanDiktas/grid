@@ -14,6 +14,11 @@ MOUNT="/Volumes/gridscout-data"
 IMAGE_SIZE="40g"
 export COLIMA_HOME="$MOUNT/colima"
 export LIMA_HOME="$MOUNT/lima"
+# Talk straight to Colima's docker socket, and use a CLEAN docker config on the image so
+# docker doesn't invoke a stale `docker-credential-desktop` helper (leftover Docker Desktop
+# config on the internal disk) — that breaks even anonymous public-image pulls.
+export DOCKER_HOST="unix://$COLIMA_HOME/docker.sock"
+export DOCKER_CONFIG="$MOUNT/docker-config"
 
 log() { printf '\033[36m[db-up]\033[0m %s\n' "$*"; }
 
@@ -29,7 +34,8 @@ if [ ! -d "$MOUNT" ]; then
   log "mounting image at $MOUNT"
   hdiutil attach "$IMAGE_FILE" >/dev/null
 fi
-mkdir -p "$COLIMA_HOME" "$LIMA_HOME"
+mkdir -p "$COLIMA_HOME" "$LIMA_HOME" "$DOCKER_CONFIG"
+[ -f "$DOCKER_CONFIG/config.json" ] || printf '{}\n' > "$DOCKER_CONFIG/config.json"
 
 # 3) ensure container tooling (small binaries via existing Homebrew)
 for f in colima docker docker-compose; do
