@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -126,15 +127,34 @@ def assert_rd_envelope(features: list[dict]) -> None:
 # Edges: network + DB (isolated so the pure functions above stay testable)
 # --------------------------------------------------------------------------- #
 
+def _keyset_filter(after_pc6: str) -> str:
+    """OGC FES 2.0 filter ``postcode6 > after_pc6`` — the keyset cursor. postcode6 is
+    ``\\d{4}[A-Z]{2}`` so it needs no XML escaping."""
+    return (
+        '<fes:Filter xmlns:fes="http://www.opengis.net/fes/2.0">'
+        "<fes:PropertyIsGreaterThan>"
+        f"<fes:ValueReference>{PC6_FIELD}</fes:ValueReference>"
+        f"<fes:Literal>{after_pc6}</fes:Literal>"
+        "</fes:PropertyIsGreaterThan></fes:Filter>"
+    )
+
+
 def fetch_page(
-    start_index: int,
     *,
+    client: httpx.Client,
     count: int = PAGE_SIZE,
     bbox: str | None = None,
-    client: httpx.Client,
+    start_index: int = 0,
+    after_pc6: str | None = None,
     retries: int = 5,
 ) -> dict:
-    """Fetch one WFS GeoJSON page. ``bbox`` is 'x1,y1,x2,y2' in RD/28992 (optional)."""
+    """Fetch one WFS GeoJSON page.
+
+    Two paging modes (the server caps numeric ``startIndex`` at ~50k, so the national load
+    cannot use offset paging — it uses a keyset cursor instead):
+    - **bbox mode** (``bbox`` set): offset paging within a small spatial tile (smoke-load).
+    - **keyset mode** (default): ``sortBy=postcode6`` + FES ``postcode6 > after_pc6``; no cap.
+    """
     params = {
         "service": "WFS",
         "version": "2.0.0",
@@ -142,12 +162,26 @@ def fetch_page(
         "typeName": TYPE_NAME,
         "outputFormat": "application/json",
         "count": str(count),
-        "startIndex": str(start_index),
     }
     if bbox is not None:
         params["bbox"] = f"{bbox},urn:ogc:def:crs:EPSG::{SOURCE_SRID}"
+        params["startIndex"] = str(start_index)
+    else:
+        params["sortBy"] = PC6_FIELD  # stable order for the keyset cursor
+        if after_pc6 is not None:
+            params["filter"] = _keyset_filter(after_pc6)
+    where = f"bbox startIndex={start_index}" if bbox is not None else f"after={after_pc6}"
     for attempt in range(retries):
-        resp = client.get(WFS_BASE, params=params)
+        try:
+            resp = client.get(WFS_BASE, params=params)
+        except httpx.TransportError as exc:
+            # Transient transport-layer failure (read/connect timeout, reset). Over ~465
+            # requests a blip is near-certain; retry rather than abort the whole load.
+            wait = 2.0 * (attempt + 1)
+            print(f"  fetch: transport error {type(exc).__name__} (attempt {attempt + 1}/"
+                  f"{retries}); retrying in {wait:.0f}s")
+            time.sleep(wait)
+            continue
         if resp.status_code >= 500:
             wait = 2.0 * (attempt + 1)
             print(f"  fetch: HTTP {resp.status_code} (attempt {attempt + 1}/{retries}); "
@@ -156,39 +190,47 @@ def fetch_page(
             continue
         resp.raise_for_status()
         return resp.json()
-    raise RuntimeError(f"PDOK WFS unavailable after {retries} attempts (startIndex={start_index})")
+    raise RuntimeError(f"PDOK WFS unavailable after {retries} attempts ({where})")
 
 
-def fetch_all(
+def iter_pages(
     *, bbox: str | None = None, max_pages: int | None = None, pause_s: float = 0.2
-) -> list[dict]:
-    """Page through every feature (optionally within ``bbox``). Returns raw feature dicts."""
-    features: list[dict] = []
+) -> Iterator[tuple[int, list[dict]]]:
+    """Yield ``(page, features)`` one WFS page at a time (streaming).
+
+    Streaming (vs. accumulating all ~465k features) keeps memory flat and lets the caller
+    upsert per page so progress is durable and resumable. National pulls use a keyset cursor
+    on ``postcode6`` (no offset cap); bbox pulls use offset paging within the small tile.
+    """
     with httpx.Client(timeout=120.0, follow_redirects=True) as client:
-        start_index = 0
         page = 0
+        start_index = 0
+        after_pc6: str | None = None
         while True:
-            batch = fetch_page(start_index, bbox=bbox, client=client)
+            batch = fetch_page(
+                client=client, bbox=bbox, start_index=start_index, after_pc6=after_pc6
+            )
             got = batch.get("features", [])
-            features.extend(got)
             page += 1
-            print(f"  page {page}: startIndex={start_index} -> {len(got)} features "
-                  f"(running total {len(features)})")
+            yield page, got
             if len(got) < PAGE_SIZE:
                 break  # short page = last page
             if max_pages is not None and page >= max_pages:
                 print(f"  stopping at max_pages={max_pages}")
                 break
-            start_index += PAGE_SIZE
+            if bbox is not None:
+                start_index += PAGE_SIZE
+            else:
+                # keyset cursor = the last (max) postcode6 of this sorted page
+                after_pc6 = got[-1]["properties"][PC6_FIELD]
             time.sleep(pause_s)  # be gentle
-    return features
 
 
-def snapshot(features: list[dict], *, tag: str = "national") -> Path:
-    """Persist the raw fetched features before parsing, so history is reprocessable."""
+def snapshot_page(features: list[dict], *, tag: str, seq: int) -> Path:
+    """Persist one raw page before parsing, so history is reprocessable. Per-page (not one giant
+    file) so a partial national load still leaves the fetched pages on disk."""
     SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
-    # Deterministic name (no wall-clock in the parse path); tag distinguishes smoke vs national.
-    path = SNAPSHOT_DIR / f"{VINTAGE_YEAR}_{tag}_{len(features)}feat.geojson"
+    path = SNAPSHOT_DIR / f"{VINTAGE_YEAR}_{tag}_{seq:04d}.geojson"
     payload = {"type": "FeatureCollection", "features": features}
     path.write_text(json.dumps(payload, ensure_ascii=False))
     return path
@@ -241,26 +283,39 @@ def upsert(areas: list[Area], conn: psycopg.Connection | None = None) -> int:
 # --------------------------------------------------------------------------- #
 
 def run(*, bboxes: list[str] | None = None, max_pages: int | None = None) -> int:
-    """Fetch → snapshot → parse → validate → upsert. ``bboxes`` (RD/28992) restricts the pull
-    (used for the smoke-load); None pulls the whole country."""
+    """Stream pages → per-page (validate → snapshot → parse → upsert → commit). ``bboxes``
+    (RD/28992) restricts the pull (used for the smoke-load); None pulls the whole country.
+
+    Per-page commit means a national load is durable and resumable: a mid-run failure leaves the
+    already-fetched pages upserted (idempotent on the pc6 PK), so a re-run finishes the rest.
+    """
     targets = bboxes if bboxes is not None else [None]
     tag = "smoke" if bboxes is not None else "national"
 
-    all_features: list[dict] = []
-    for bbox in targets:
-        where = f"bbox={bbox}" if bbox else "national"
-        print(f"ingest[{SOURCE}]: fetching {where}")
-        all_features.extend(fetch_all(bbox=bbox, max_pages=max_pages))
+    written = 0
+    seq = 0
+    conn = connect()
+    try:
+        for bbox in targets:
+            where = f"bbox={bbox}" if bbox else "national"
+            print(f"ingest[{SOURCE}]: fetching {where}")
+            for page, got in iter_pages(bbox=bbox, max_pages=max_pages):
+                seq += 1
+                print(f"  page {page}: -> {len(got)} features (committed so far {written})")
+                if not got:
+                    continue
+                assert_rd_envelope(got)  # per-page CRS guard, before any DB write
+                snapshot_page(got, tag=tag, seq=seq)
+                areas = parse_features({"features": got})
+                upsert(areas, conn=conn)
+                conn.commit()  # durable per page
+                written += len(areas)
+    finally:
+        conn.close()
 
-    if not all_features:
-        raise RuntimeError("fetched 0 features — aborting rather than writing an empty result")
+    if written == 0:
+        raise RuntimeError("upserted 0 features — aborting rather than claiming an empty result")
 
-    assert_rd_envelope(all_features)  # fail before we touch the DB if the CRS is wrong
-    snap = snapshot(all_features, tag=tag)
-    print(f"ingest[{SOURCE}]: snapshot -> {snap} ({len(all_features)} features)")
-
-    areas = parse_features({"features": all_features})
-    written = upsert(areas)
     print(f"ingest[{SOURCE}]: upserted {written} PC6 polygon(s), as_of={AS_OF} "
           f"(vintage {VINTAGE_YEAR}; no Last-Modified served), source={SOURCE}")
     return written
